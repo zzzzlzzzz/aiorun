@@ -11,7 +11,19 @@ This can lead to many race conditions and hanging your application at exit point
 
 # 📘 How to use?
 
-Just:
+Install from pypi:
+
+```shell
+pip install aiogo
+```
+
+or, if you prefer poetry:
+
+```shell
+poetry add aiogo
+```
+
+And just:
 
 ```python
 from asyncio import Future
@@ -53,3 +65,8 @@ from aiogo import go
 go(main, exit_timeout=10)
 ```
 And all your coroutines will be got CancelledError, as doing old good asyncio.run.
+
+# 🌎 Hot to contribute?
+- Make a repository fork
+- Apply your changes (don't forget install pre-commit before making commit)
+- Make a pull request
