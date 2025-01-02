@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "aiogo"
+version = "0.1.0"
+description = ""
+authors = ["tony9152273 <9152273+zzzzlzzzz@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pytest = {version = "^8.3.4", optional = true}
+ruff = {version = "^0.8.5", optional = true}
+mypy = {version = "^1.14.1", optional = true}
+pytest-xdist = {version = "^3.6.1", optional = true}
+
+[tool.poetry.extras]
+ci = ["pytest", "pytest-xdist", "ruff", "mypy"]
+
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["aiogo"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+addopts = "-n auto"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
