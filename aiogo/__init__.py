@@ -3,6 +3,15 @@ import typing as t
 import types as ts
 import contextlib as c
 import signal as s
+import concurrent.futures as fut
+
+
+FutureValue = t.TypeVar("FutureValue")
+
+
+def _safe_set_future_result(future: a.Future[FutureValue], value: FutureValue) -> None:
+    if not future.done():
+        future.set_result(value)
 
 
 @c.contextmanager
@@ -19,13 +28,15 @@ def _event_loop(
 
 
 @c.contextmanager
-def _register_signals(termination: a.Future[bool]) -> t.Generator[None, None, None]:
+def _register_signals(
+    event_loop: a.AbstractEventLoop,
+    termination: a.Future[None],
+) -> t.Generator[None, None, None]:
     def _exit_handler(
         _signal_num: int,
         _frame: ts.FrameType | None,
     ) -> None:
-        if not termination.done():
-            termination.set_result(True)
+        event_loop.call_soon(_safe_set_future_result, termination, None)
 
     def _restore_signal_handler(
         _signal_num: int,
@@ -44,9 +55,12 @@ def _register_signals(termination: a.Future[bool]) -> t.Generator[None, None, No
 
 
 @c.contextmanager
-def _close_all_resources(
+def _setup_resources(
     event_loop: a.AbstractEventLoop,
+    default_executor: fut.ThreadPoolExecutor | None,
 ) -> t.Generator[None, None, None]:
+    if default_executor is not None:
+        event_loop.set_default_executor(default_executor)
     try:
         yield
     finally:
@@ -73,7 +87,7 @@ def _close_all_resources(
 
 class EntrypointProtocol(t.Protocol):
     def __call__(
-        self, termination: a.Future[bool]
+        self, termination: a.Future[None]
     ) -> t.Coroutine[t.Any, t.Any, t.Any]: ...
 
 
@@ -81,30 +95,36 @@ def go(
     entrypoint: EntrypointProtocol,
     event_loop_factory: t.Callable[[], a.AbstractEventLoop] = a.new_event_loop,
     exit_timeout: float | None = None,
-) -> None:
+    default_executor: fut.ThreadPoolExecutor | None = None,
+) -> t.Any:
     with _event_loop(event_loop_factory) as event_loop:
-        termination: a.Future[bool] = event_loop.create_future()
+        termination: a.Future[None] = event_loop.create_future()
         with (
-            _register_signals(termination),
-            _close_all_resources(event_loop),
+            _register_signals(
+                event_loop=event_loop,
+                termination=termination,
+            ),
+            _setup_resources(
+                event_loop=event_loop,
+                default_executor=default_executor,
+            ),
         ):
             entrypoint_task = event_loop.create_task(
                 entrypoint(termination=termination)
             )
-            done, _ = event_loop.run_until_complete(
+            done, pending = event_loop.run_until_complete(
                 a.wait((termination, entrypoint_task), return_when=a.FIRST_COMPLETED)
             )
 
-            if termination in done:
-                event_loop.run_until_complete(termination)
-            else:
-                termination.set_result(True)
+            if termination in pending:
+                event_loop.call_soon(_safe_set_future_result, termination, None)
+            event_loop.run_until_complete(termination)
 
             if entrypoint_task in done:
-                event_loop.run_until_complete(entrypoint_task)
+                return event_loop.run_until_complete(entrypoint_task)
             else:
                 try:
-                    event_loop.run_until_complete(
+                    return event_loop.run_until_complete(
                         a.wait_for(fut=entrypoint_task, timeout=exit_timeout)
                     )
                 except a.TimeoutError as error:

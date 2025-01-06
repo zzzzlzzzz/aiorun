@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "aiogo"
-version = "0.1.2"
+version = "0.2.0"
 description = "Tiny helper for running your async code"
 authors = ["tony9152273 <9152273+zzzzlzzzz@users.noreply.github.com>"]
 readme = "README.md"

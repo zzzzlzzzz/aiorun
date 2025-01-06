@@ -2,7 +2,9 @@ import asyncio as a
 import functools as f
 import signal as s
 import logging as l
+import time
 import time as tm
+import concurrent.futures as fut
 
 from aiogo import go
 import pytest
@@ -17,10 +19,10 @@ def test_go_exit_success(caplog, signal_num) -> None:
     cancelled_task: a.Task | None = None
 
     async def main_task(
-        termination: a.Future[bool],
+        termination: a.Future[None],
         a_arg: int,
         b_arg: str = "mmmm",
-    ) -> None:
+    ) -> int:
         nonlocal cancelled_task
         assert a_arg == a_arg_value and b_arg == b_arg_value
 
@@ -35,10 +37,11 @@ def test_go_exit_success(caplog, signal_num) -> None:
         cancelled_task = a.create_task(cancelled())
         await terminate_task
         await termination
+        return 1
 
     with caplog.at_level(l.ERROR):
         run_at = tm.monotonic()
-        go(f.partial(main_task, a_arg=a_arg_value, b_arg=b_arg_value))
+        assert go(f.partial(main_task, a_arg=a_arg_value, b_arg=b_arg_value)) == 1
         assert (
             (alive_delay - alive_offset)
             <= tm.monotonic() - run_at
@@ -56,10 +59,10 @@ def test_go_exit_with_some_delay_success(caplog, signal_num) -> None:
     alive_offset = 0.5
 
     async def main_task(
-        termination: a.Future[bool],
+        termination: a.Future[None],
         a_arg: int,
         b_arg: str = "mmmm",
-    ) -> None:
+    ) -> int:
         assert a_arg == a_arg_value and b_arg == b_arg_value
 
         async def terminate() -> None:
@@ -70,10 +73,11 @@ def test_go_exit_with_some_delay_success(caplog, signal_num) -> None:
         await terminate_task
         await termination
         await a.sleep(alive_delay)
+        return 2
 
     with caplog.at_level(l.ERROR):
         run_at = tm.monotonic()
-        go(f.partial(main_task, a_arg=a_arg_value, b_arg=b_arg_value))
+        assert go(f.partial(main_task, a_arg=a_arg_value, b_arg=b_arg_value)) == 2
         assert (
             (2 * alive_delay - alive_offset)
             <= tm.monotonic() - run_at
@@ -88,14 +92,15 @@ def test_go_exit_success_without_wait_termination(caplog, signal_num) -> None:
     b_arg_value = "xoxo"
 
     async def main_task(
-        termination: a.Future[bool],
+        termination: a.Future[None],
         a_arg: int,
         b_arg: str = "mmmm",
-    ) -> None:
+    ) -> int:
         assert a_arg == a_arg_value and b_arg == b_arg_value
+        return 3
 
     with caplog.at_level(l.ERROR):
-        go(f.partial(main_task, a_arg=a_arg_value, b_arg=b_arg_value))
+        assert go(f.partial(main_task, a_arg=a_arg_value, b_arg=b_arg_value)) == 3
     assert len(caplog.records) == 0
 
 
@@ -107,7 +112,7 @@ def test_go_exit_with_some_delay_exception(caplog, signal_num) -> None:
     alive_offset = 0.5
 
     async def main_task(
-        termination: a.Future[bool],
+        termination: a.Future[None],
         a_arg: int,
         b_arg: str = "mmmm",
     ) -> None:
@@ -142,7 +147,7 @@ def test_go_exit_with_some_delay_out_of_timeout(caplog, signal_num) -> None:
     alive_offset = 0.5
 
     async def main_task(
-        termination: a.Future[bool],
+        termination: a.Future[None],
         a_arg: int,
         b_arg: str = "mmmm",
     ) -> None:
@@ -171,3 +176,17 @@ def test_go_exit_with_some_delay_out_of_timeout(caplog, signal_num) -> None:
     assert len(caplog.records) == 1
     assert caplog.records[0].levelname == l.getLevelName(l.ERROR)
     assert "entrypoint out of timeout" in caplog.records[0].message
+
+
+def test_default_executor() -> None:
+    def thread_func() -> int:
+        time.sleep(1)
+        return 42
+
+    async def main_task(termination: a.Future[None]) -> int:
+        return await a.to_thread(thread_func)
+
+    with fut.ThreadPoolExecutor() as pool_executor:
+        assert go(main_task, default_executor=pool_executor) == 42
+        with pytest.raises(RuntimeError):
+            pool_executor.submit(thread_func)
